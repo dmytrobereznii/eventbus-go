@@ -19,22 +19,26 @@ type Handler func(e any)
 
 type Bus struct {
 	mu     sync.RWMutex
-	topics map[reflect.Type][]Handler
+	events map[reflect.Type][]func(any)
 }
 
 func NewBus() *Bus {
-	return &Bus{topics: make(map[reflect.Type][]Handler)}
+	return &Bus{events: make(map[reflect.Type][]func(any))}
 }
 
-func Subscribe[T any](b *Bus, h Handler) {
+func Subscribe[T any](b *Bus, h func(T)) {
+	wrapper := func(e any) {
+		h(e.(T))
+	}
+
 	b.mu.Lock()
-	b.topics[reflect.TypeFor[T]()] = append(b.topics[reflect.TypeFor[T]()], h)
+	b.events[reflect.TypeFor[T]()] = append(b.events[reflect.TypeFor[T]()], wrapper)
 	b.mu.Unlock()
 }
 
 func Publish[T any](b *Bus, e T) {
 	b.mu.RLock()
-	subscribers, ok := b.topics[reflect.TypeFor[T]()]
+	subscribers, ok := b.events[reflect.TypeFor[T]()]
 	b.mu.RUnlock()
 	if !ok {
 		return
@@ -48,11 +52,11 @@ func Publish[T any](b *Bus, e T) {
 func main() {
 	bus := NewBus()
 
-	Subscribe[ChangeDelta](bus, func(e any) {
-		fmt.Printf("%s\n", e)
+	Subscribe[ChangeDelta](bus, func(e ChangeDelta) {
+		fmt.Printf("Delta changed %s\n", e.NewDefaultRoute)
 	})
-	Subscribe[RouteUpdate](bus, func(e any) {
-		fmt.Printf("%s\n", e)
+	Subscribe[RouteUpdate](bus, func(e RouteUpdate) {
+		fmt.Printf("Route changed %s:%s\n", e.Added, e.Removed)
 	})
 
 	Publish[ChangeDelta](bus, ChangeDelta{NewDefaultRoute: "192.168.1.1"})
