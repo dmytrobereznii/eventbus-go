@@ -7,4 +7,4 @@ vet: fmt
 	go vet ./...
 
 run: vet
-	go run ./
+	go run ./cmd
