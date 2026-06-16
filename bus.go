@@ -15,8 +15,6 @@ type RouteUpdate struct {
 	Removed []string
 }
 
-type Handler func(e any)
-
 type Bus struct {
 	mu     sync.RWMutex
 	events map[reflect.Type][]func(any)
@@ -38,14 +36,14 @@ func Subscribe[T any](b *Bus, h func(T)) {
 
 func Publish[T any](b *Bus, e T) {
 	b.mu.RLock()
-	subscribers, ok := b.events[reflect.TypeFor[T]()]
+	handlers, ok := b.events[reflect.TypeFor[T]()]
 	b.mu.RUnlock()
 	if !ok {
 		return
 	}
 
-	for _, handler := range subscribers {
-		handler(e) // slow handler delays whole flow
+	for _, h := range handlers {
+		h(e) // sync, so slow handler delays whole flow
 	}
 }
 
