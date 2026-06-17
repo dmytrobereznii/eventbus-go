@@ -8,3 +8,6 @@ vet: fmt
 
 run: vet
 	go run ./cmd
+
+test:
+	go test -race -v ./...
