@@ -30,4 +30,6 @@ func main() {
 
 	v2 := <-routeSub.Queue
 	fmt.Printf("new route: %v\n", v2)
+
+	b.Close()
 }
