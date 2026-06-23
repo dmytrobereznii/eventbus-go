@@ -5,19 +5,33 @@ import (
 	"sync"
 )
 
+// PublishedEvent typed wrapper over generic event sent to bus
+type PublishedEvent struct {
+	Event any
+	From  *Client
+	To    *Client
+}
+
+// DeliveredEvent typed wrapper over generic event received by subscriber
+type DeliveredEvent struct {
+	Event any
+	From  *Client
+	To    *Client
+}
+
 // Bus routes events from publishers to subscribers
 type Bus struct {
-	mu              sync.RWMutex
-	events          map[reflect.Type][]*subscribeState
-	publishedEvents chan PublishedEvent
-	done            chan struct{}
+	mu     sync.RWMutex
+	events map[reflect.Type][]*subscribeState
+	write  chan PublishedEvent
+	done   chan struct{}
 }
 
 func NewBus() *Bus {
 	b := &Bus{
-		events:          make(map[reflect.Type][]*subscribeState),
-		publishedEvents: make(chan PublishedEvent),
-		done:            make(chan struct{}),
+		events: make(map[reflect.Type][]*subscribeState),
+		write:  make(chan PublishedEvent),
+		done:   make(chan struct{}),
 	}
 	go b.pump()
 	return b
@@ -25,14 +39,14 @@ func NewBus() *Bus {
 
 func (b *Bus) pump() {
 	defer close(b.done)
-	for e := range b.publishedEvents { //blocks waiting for values, exists only on channel close
+	for e := range b.write { //blocks waiting for values, exists only on channel close
 		t := reflect.TypeOf(e.Event)
 		b.mu.RLock()
 		states := b.events[t]
 		b.mu.RUnlock()
 
 		for _, s := range states {
-			s.deliveredEvents <- DeliveredEvent{Event: e.Event}
+			s.write <- DeliveredEvent{Event: e.Event}
 		}
 	}
 }
@@ -45,7 +59,7 @@ func (b *Bus) Client(name string) *Client {
 }
 
 func (b *Bus) Close() {
-	close(b.publishedEvents)
+	close(b.write)
 	<-b.done
 }
 
@@ -61,36 +75,22 @@ func (c *Client) subscribeState() *subscribeState {
 	defer c.mu.Unlock()
 	if nil == c.state {
 		c.state = &subscribeState{
-			deliveredEvents: make(chan DeliveredEvent),
-			subs:            make(map[reflect.Type]subscriber),
+			write: make(chan DeliveredEvent),
+			subs:  make(map[reflect.Type]subscriber),
 		}
 		go c.state.pump()
 	}
 	return c.state
 }
 
-// PublishedEvent typed wrapper over generic event sent to bus
-type PublishedEvent struct {
-	Event any
-	From  *Client
-	To    *Client
-}
-
-// DeliveredEvent typed wrapper over generic event received by subscriber
-type DeliveredEvent struct {
-	Event any
-	From  *Client
-	To    *Client
-}
-
 // subscribeState is Client's engine
 type subscribeState struct {
-	deliveredEvents chan DeliveredEvent
-	subs            map[reflect.Type]subscriber //map of event => subscriber
+	write chan DeliveredEvent
+	subs  map[reflect.Type]subscriber //map of event => subscriber
 }
 
 func (state *subscribeState) pump() {
-	for e := range state.deliveredEvents {
+	for e := range state.write {
 		sub := state.subs[reflect.TypeOf(e.Event)]
 		sub.send(e.Event)
 	}
@@ -131,7 +131,7 @@ func Subscribe[T any](c *Client) *Subscriber[T] {
 }
 
 func Publish[T any](c *Client, event T) {
-	c.Bus.publishedEvents <- PublishedEvent{
+	c.Bus.write <- PublishedEvent{
 		Event: event,
 		From:  c,
 	}
