@@ -11,3 +11,6 @@ run: vet
 
 test:
 	go test -race -v ./... -timeout 10s
+
+coverage:
+	go test -coverprofile=coverage.out ./... && go tool cover -html=coverage.out
