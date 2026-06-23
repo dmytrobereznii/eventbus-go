@@ -27,11 +27,13 @@ func main() {
 		bus.Publish(netmon, RouteUpdateEvent{Added: []string{"10.0.0.0/8"}})
 	}()
 
-	v1 := <-deltaSub.Queue
+	v1 := <-deltaSub.Ch
 	fmt.Printf("new default route: %v\n", v1)
 
-	v2 := <-routeSub.Queue
+	v2 := <-routeSub.Ch
 	fmt.Printf("new route: %v\n", v2)
 
+	backend.Close()
+	netmon.Close()
 	b.Close()
 }

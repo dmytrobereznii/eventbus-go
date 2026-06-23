@@ -27,7 +27,7 @@ func TestSingleEvent(t *testing.T) {
 
 	bus.Publish(netmon, want1)
 
-	got1 := <-deltaSub.Queue
+	got1 := <-deltaSub.Ch
 	if !reflect.DeepEqual(got1, want1) {
 		t.Errorf("got %v, want %v", got1, want1)
 	}
@@ -47,12 +47,12 @@ func TestDifferentEvents(t *testing.T) {
 	bus.Publish(netmon, want1)
 	bus.Publish(netmon, want2)
 
-	got1 := <-deltaSub.Queue
+	got1 := <-deltaSub.Ch
 	if !reflect.DeepEqual(got1, want1) {
 		t.Errorf("got %v, want %v", got1, want1)
 	}
 
-	got2 := <-routeSub.Queue
+	got2 := <-routeSub.Ch
 	if !reflect.DeepEqual(got2, want2) {
 		t.Errorf("got %v, want %v", got2, want2)
 	}
@@ -70,13 +70,13 @@ func TestTypeIsolation(t *testing.T) {
 
 	bus.Publish(netmon, want)
 
-	got1 := <-deltaSub.Queue
+	got1 := <-deltaSub.Ch
 	if !reflect.DeepEqual(got1, want) {
 		t.Errorf("got %v, want %v", got1, want)
 	}
 
 	select {
-	case got2 := <-routeSub.Queue:
+	case got2 := <-routeSub.Ch:
 		t.Errorf("got %v, want nothing", got2) //todo: fix after delivery is async
 	default:
 	}
@@ -98,7 +98,7 @@ func TestFanOut(t *testing.T) {
 	bus.Publish(netmon, want)
 
 	for _, sub := range subs {
-		got := <-sub.Queue
+		got := <-sub.Ch
 		if !reflect.DeepEqual(got, want) {
 			t.Errorf("got %v, want %v", got, want)
 		}

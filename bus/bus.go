@@ -1,6 +1,7 @@
 package bus
 
 import (
+	"context"
 	"reflect"
 	"sync"
 )
@@ -24,31 +25,45 @@ type Bus struct {
 	mu     sync.RWMutex
 	events map[reflect.Type][]*subscribeState
 	write  chan PublishedEvent
+	cancel context.CancelFunc
 	done   chan struct{}
 }
 
 func NewBus() *Bus {
+	ctx, cancel := context.WithCancel(context.Background())
 	b := &Bus{
 		events: make(map[reflect.Type][]*subscribeState),
 		write:  make(chan PublishedEvent),
 		done:   make(chan struct{}),
+		cancel: cancel,
 	}
-	go b.pump()
+	go b.pump(ctx)
 	return b
 }
 
-func (b *Bus) pump() {
+func (b *Bus) pump(ctx context.Context) {
 	defer close(b.done)
-	for e := range b.write { //blocks waiting for values, exists only on channel close
-		t := reflect.TypeOf(e.Event)
-		b.mu.RLock()
-		states := b.events[t]
-		b.mu.RUnlock()
+	for {
+		select {
+		case e := <-b.write:
+			t := reflect.TypeOf(e.Event)
+			b.mu.RLock()
+			subStates := b.events[t]
+			b.mu.RUnlock()
 
-		for _, s := range states {
-			s.write <- DeliveredEvent{Event: e.Event}
+			for _, ss := range subStates {
+				ss.write <- DeliveredEvent{Event: e.Event, From: e.From, To: ss.client}
+			}
+		case <-ctx.Done():
+			return
 		}
 	}
+}
+
+func (b *Bus) subscribe(t reflect.Type, state *subscribeState) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.events[t] = append(b.events[t], state)
 }
 
 func (b *Bus) Client(name string) *Client {
@@ -59,7 +74,7 @@ func (b *Bus) Client(name string) *Client {
 }
 
 func (b *Bus) Close() {
-	close(b.write)
+	b.cancel()
 	<-b.done
 }
 
@@ -74,44 +89,108 @@ func (c *Client) subscribeState() *subscribeState {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if nil == c.state {
-		c.state = &subscribeState{
-			write: make(chan DeliveredEvent),
-			subs:  make(map[reflect.Type]subscriber),
-		}
-		go c.state.pump()
+		c.state = newSubscribeState(c)
 	}
 	return c.state
 }
 
-// subscribeState is Client's engine
-type subscribeState struct {
-	write chan DeliveredEvent
-	subs  map[reflect.Type]subscriber //map of event => subscriber
+func (c *Client) Close() {
+	c.mu.Lock()
+	state := c.state
+	c.state = nil
+	c.mu.Unlock()
+	if nil != state {
+		state.cancel()
+		<-state.done
+	}
 }
 
-func (state *subscribeState) pump() {
-	for e := range state.write {
-		sub := state.subs[reflect.TypeOf(e.Event)]
-		sub.send(e.Event)
+// subscribeState is Client's engine
+type subscribeState struct {
+	client *Client
+	write  chan DeliveredEvent
+	done   chan struct{}
+	subs   map[reflect.Type]subscriber //map of event => subscriber
+	mu     sync.RWMutex
+	cancel context.CancelFunc
+}
+
+func newSubscribeState(c *Client) *subscribeState {
+	ctx, cancel := context.WithCancel(context.Background())
+	state := &subscribeState{
+		client: c,
+		write:  make(chan DeliveredEvent),
+		done:   make(chan struct{}),
+		subs:   make(map[reflect.Type]subscriber),
+		cancel: cancel,
+	}
+	go state.pump(ctx)
+	return state
+}
+
+func (state *subscribeState) pump(ctx context.Context) {
+	defer close(state.done)
+	var queue Queue[DeliveredEvent]
+
+	acceptCh := func() chan DeliveredEvent {
+		if queue.Full() {
+			return nil
+		}
+		return state.write
+	}
+
+	for {
+		if queue.Empty() {
+			select {
+			case val := <-state.write:
+				queue.Add(val)
+			case <-ctx.Done():
+				return
+			}
+		} else {
+			val := queue.Peek()
+			state.mu.Lock()
+			sub := state.subs[reflect.TypeOf(val.Event)]
+			state.mu.Unlock()
+			if sub == nil {
+				queue.Drop()
+				continue
+			}
+
+			if !sub.dispatch(ctx, &queue, acceptCh) {
+				return
+			}
+		}
 	}
 }
 
 // Subscriber hold a subscription for a single event type
 type Subscriber[T any] struct {
-	Queue chan T
+	Ch chan T
 }
 
-func (sub *Subscriber[T]) send(event any) {
-	sub.Queue <- event.(T)
+func (sub *Subscriber[T]) dispatch(ctx context.Context, queue *Queue[DeliveredEvent], acceptCh func() chan DeliveredEvent) bool {
+	t := queue.Peek().Event.(T)
+	for {
+		select {
+		case sub.Ch <- t:
+			queue.Drop()
+			return true
+		case val := <-acceptCh():
+			queue.Add(val)
+		case <-ctx.Done():
+			return false
+		}
+	}
 }
 
 type subscriber interface {
-	send(event any)
+	dispatch(ctx context.Context, vals *Queue[DeliveredEvent], acceptCh func() chan DeliveredEvent) bool
 }
 
 func NewSubscriber[T any]() *Subscriber[T] {
 	return &Subscriber[T]{
-		Queue: make(chan T),
+		Ch: make(chan T),
 	}
 }
 
@@ -120,19 +199,18 @@ func Subscribe[T any](c *Client) *Subscriber[T] {
 	sub := NewSubscriber[T]()
 
 	state := c.subscribeState()
-
-	c.mu.Lock()
+	state.mu.Lock()
 	state.subs[t] = sub // what if it existed before?
-	c.mu.Unlock()
+	state.mu.Unlock()
 
-	c.Bus.events[t] = append(c.Bus.events[t], state)
+	c.Bus.subscribe(t, state)
 
 	return sub
 }
 
-func Publish[T any](c *Client, event T) {
+func Publish[T any](c *Client, e T) {
 	c.Bus.write <- PublishedEvent{
-		Event: event,
+		Event: e,
 		From:  c,
 	}
 }
