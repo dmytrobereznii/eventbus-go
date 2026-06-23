@@ -10,4 +10,4 @@ run: vet
 	go run ./cmd
 
 test:
-	go test -race -v ./...
+	go test -race -v ./... -timeout 10s

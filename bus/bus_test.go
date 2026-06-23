@@ -2,6 +2,7 @@ package bus_test
 
 import (
 	"eventbus/bus"
+	"fmt"
 	"reflect"
 	"testing"
 )
@@ -17,13 +18,14 @@ type RouteUpdateEvent struct {
 
 func TestSingleEvent(t *testing.T) {
 	b := bus.NewBus()
-	c := b.Client("client")
+	netmon := b.Client("netmon")
+	backend := b.Client("ipnlocal")
 
-	deltaSub := bus.Subscribe[ChangeDeltaEvent](c)
+	deltaSub := bus.Subscribe[ChangeDeltaEvent](backend)
 
 	want1 := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 
-	bus.Publish(c, want1)
+	bus.Publish(netmon, want1)
 
 	got1 := <-deltaSub.Queue
 	if !reflect.DeepEqual(got1, want1) {
@@ -33,16 +35,17 @@ func TestSingleEvent(t *testing.T) {
 
 func TestDifferentEvents(t *testing.T) {
 	b := bus.NewBus()
-	c := b.Client("client")
+	netmon := b.Client("netmon")
+	backend := b.Client("ipnlocal")
 
-	deltaCon := bus.Subscribe[ChangeDeltaEvent](c)
-	routeCon := bus.Subscribe[RouteUpdateEvent](c)
+	deltaCon := bus.Subscribe[ChangeDeltaEvent](backend)
+	routeCon := bus.Subscribe[RouteUpdateEvent](backend)
 
 	want1 := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 	want2 := RouteUpdateEvent{Added: []string{"10.0.0.0/8"}}
 
-	bus.Publish(c, want1)
-	bus.Publish(c, want2)
+	bus.Publish(netmon, want1)
+	bus.Publish(netmon, want2)
 
 	got1 := <-deltaCon.Queue
 	if !reflect.DeepEqual(got1, want1) {
@@ -57,14 +60,15 @@ func TestDifferentEvents(t *testing.T) {
 
 func TestTypeIsolation(t *testing.T) {
 	b := bus.NewBus()
-	c := b.Client("client")
+	netmon := b.Client("netmon")
+	backend := b.Client("ipnlocal")
 
-	deltaCon := bus.Subscribe[ChangeDeltaEvent](c)
-	routeCon := bus.Subscribe[RouteUpdateEvent](c)
+	deltaCon := bus.Subscribe[ChangeDeltaEvent](backend)
+	routeCon := bus.Subscribe[RouteUpdateEvent](backend)
 
 	want := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 
-	bus.Publish(c, want)
+	bus.Publish(netmon, want)
 
 	got1 := <-deltaCon.Queue
 	if !reflect.DeepEqual(got1, want) {
@@ -80,17 +84,18 @@ func TestTypeIsolation(t *testing.T) {
 
 func TestFanOut(t *testing.T) {
 	b := bus.NewBus()
-	c := b.Client("client")
+	netmon := b.Client("netmon")
 
 	var consumers []*bus.Subscriber[ChangeDeltaEvent]
 
-	for range 2 {
-		consumers = append(consumers, bus.Subscribe[ChangeDeltaEvent](c))
+	for i := range 2 {
+		client := b.Client(fmt.Sprintf("ipnlocal-%d", i))
+		consumers = append(consumers, bus.Subscribe[ChangeDeltaEvent](client))
 	}
 
 	want := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 
-	bus.Publish(c, want)
+	bus.Publish(netmon, want)
 
 	for _, consumer := range consumers {
 		got := <-consumer.Queue
@@ -102,7 +107,7 @@ func TestFanOut(t *testing.T) {
 
 func TestNoConsNoop(t *testing.T) {
 	b := bus.NewBus()
-	c := b.Client("client")
+	netmon := b.Client("netmon")
 
-	bus.Publish(c, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
+	bus.Publish(netmon, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
 }

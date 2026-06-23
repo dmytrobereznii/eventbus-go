@@ -16,14 +16,15 @@ type RouteUpdateEvent struct {
 
 func main() {
 	b := bus.NewBus()
-	c := b.Client("client")
+	netmon := b.Client("netmon")    // publishes network changes
+	backend := b.Client("ipnlocal") // subscribes to network changes
 
-	deltaSub := bus.Subscribe[ChangeDeltaEvent](c)
-	routeSub := bus.Subscribe[RouteUpdateEvent](c)
+	deltaSub := bus.Subscribe[ChangeDeltaEvent](backend)
+	routeSub := bus.Subscribe[RouteUpdateEvent](backend)
 
 	go func() {
-		bus.Publish(c, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
-		bus.Publish(c, RouteUpdateEvent{Added: []string{"10.0.0.0/8"}})
+		bus.Publish(netmon, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
+		bus.Publish(netmon, RouteUpdateEvent{Added: []string{"10.0.0.0/8"}})
 	}()
 
 	v1 := <-deltaSub.Queue
