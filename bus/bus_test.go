@@ -17,12 +17,13 @@ type RouteUpdateEvent struct {
 
 func TestSingleEvent(t *testing.T) {
 	b := bus.NewBus()
+	c := b.Client("client")
 
-	deltaSub := bus.Subscribe[ChangeDeltaEvent](b)
+	deltaSub := bus.Subscribe[ChangeDeltaEvent](c)
 
 	want1 := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 
-	bus.Publish(b, want1)
+	bus.Publish(c, want1)
 
 	got1 := <-deltaSub.Queue
 	if !reflect.DeepEqual(got1, want1) {
@@ -32,15 +33,16 @@ func TestSingleEvent(t *testing.T) {
 
 func TestDifferentEvents(t *testing.T) {
 	b := bus.NewBus()
+	c := b.Client("client")
 
-	deltaCon := bus.Subscribe[ChangeDeltaEvent](b)
-	routeCon := bus.Subscribe[RouteUpdateEvent](b)
+	deltaCon := bus.Subscribe[ChangeDeltaEvent](c)
+	routeCon := bus.Subscribe[RouteUpdateEvent](c)
 
 	want1 := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 	want2 := RouteUpdateEvent{Added: []string{"10.0.0.0/8"}}
 
-	bus.Publish(b, want1)
-	bus.Publish(b, want2)
+	bus.Publish(c, want1)
+	bus.Publish(c, want2)
 
 	got1 := <-deltaCon.Queue
 	if !reflect.DeepEqual(got1, want1) {
@@ -55,13 +57,14 @@ func TestDifferentEvents(t *testing.T) {
 
 func TestTypeIsolation(t *testing.T) {
 	b := bus.NewBus()
+	c := b.Client("client")
 
-	deltaCon := bus.Subscribe[ChangeDeltaEvent](b)
-	routeCon := bus.Subscribe[RouteUpdateEvent](b)
+	deltaCon := bus.Subscribe[ChangeDeltaEvent](c)
+	routeCon := bus.Subscribe[RouteUpdateEvent](c)
 
 	want := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 
-	bus.Publish(b, want)
+	bus.Publish(c, want)
 
 	got1 := <-deltaCon.Queue
 	if !reflect.DeepEqual(got1, want) {
@@ -70,23 +73,24 @@ func TestTypeIsolation(t *testing.T) {
 
 	select {
 	case got2 := <-routeCon.Queue:
-		t.Errorf("got %v, want nothing", got2)
+		t.Errorf("got %v, want nothing", got2) //todo: fix after delivery is async
 	default:
 	}
 }
 
 func TestFanOut(t *testing.T) {
 	b := bus.NewBus()
+	c := b.Client("client")
 
-	var consumers []*bus.Consumer[ChangeDeltaEvent]
+	var consumers []*bus.Subscriber[ChangeDeltaEvent]
 
 	for range 2 {
-		consumers = append(consumers, bus.Subscribe[ChangeDeltaEvent](b))
+		consumers = append(consumers, bus.Subscribe[ChangeDeltaEvent](c))
 	}
 
 	want := ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"}
 
-	bus.Publish(b, want)
+	bus.Publish(c, want)
 
 	for _, consumer := range consumers {
 		got := <-consumer.Queue
@@ -98,6 +102,7 @@ func TestFanOut(t *testing.T) {
 
 func TestNoConsNoop(t *testing.T) {
 	b := bus.NewBus()
+	c := b.Client("client")
 
-	bus.Publish(b, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
+	bus.Publish(c, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
 }

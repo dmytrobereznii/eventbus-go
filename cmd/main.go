@@ -16,13 +16,14 @@ type RouteUpdateEvent struct {
 
 func main() {
 	b := bus.NewBus()
+	c := b.Client("client")
 
-	deltaSub := bus.Subscribe[ChangeDeltaEvent](b)
-	routeSub := bus.Subscribe[RouteUpdateEvent](b)
+	deltaSub := bus.Subscribe[ChangeDeltaEvent](c)
+	routeSub := bus.Subscribe[RouteUpdateEvent](c)
 
 	go func() {
-		bus.Publish(b, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
-		bus.Publish(b, RouteUpdateEvent{Added: []string{"10.0.0.0/8"}})
+		bus.Publish(c, ChangeDeltaEvent{NewDefaultRoute: "192.168.1.1"})
+		bus.Publish(c, RouteUpdateEvent{Added: []string{"10.0.0.0/8"}})
 	}()
 
 	v1 := <-deltaSub.Queue

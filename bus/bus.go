@@ -5,6 +5,7 @@ import (
 	"sync"
 )
 
+// Bus routes events from publishers to subscribers
 type Bus struct {
 	mu     sync.RWMutex
 	events map[reflect.Type][]*subscribeState
@@ -36,55 +37,79 @@ func (b *Bus) pump() {
 	}
 }
 
+func (b *Bus) Client(name string) *Client {
+	return &Client{
+		Bus:  b,
+		Name: name,
+	}
+}
+
 func (b *Bus) Close() {
 	close(b.write)
 	<-b.done
 }
 
+type Client struct {
+	Bus  *Bus
+	Name string
+}
+
+// PublishedEvent typed wrapper over generic event sent to bus
 type PublishedEvent struct {
 	Event any
+	From  *Client
+	To    *Client
 }
 
+// DeliveredEvent typed wrapper over generic event received by subscriber
 type DeliveredEvent struct {
 	Event any
+	From  *Client
+	To    *Client
 }
 
+// subscribeState is Client's engine
 type subscribeState struct {
 	write chan DeliveredEvent
 }
 
-type Consumer[T any] struct {
+// Subscriber hold a subscription for a single event type
+type Subscriber[T any] struct {
 	state *subscribeState
 	Queue chan T
 }
 
-func NewConsumer[T any](state *subscribeState) *Consumer[T] {
-	return &Consumer[T]{
+func NewSubscriber[T any](state *subscribeState) *Subscriber[T] {
+	return &Subscriber[T]{
 		state: state,
 		Queue: make(chan T),
 	}
 }
 
-func (c *Consumer[T]) pump() {
+func (c *Subscriber[T]) pump() {
 	for e := range c.state.write {
 		c.Queue <- e.Event.(T)
 	}
 }
 
-func Subscribe[T any](b *Bus) *Consumer[T] {
+func Subscribe[T any](c *Client) *Subscriber[T] {
+	b := c.Bus
 	state := &subscribeState{write: make(chan DeliveredEvent)}
 
-	con := NewConsumer[T](state)
+	sub := NewSubscriber[T](state)
 
 	b.mu.Lock()
 	b.events[reflect.TypeFor[T]()] = append(b.events[reflect.TypeFor[T]()], state)
 	b.mu.Unlock()
 
-	go con.pump()
+	go sub.pump()
 
-	return con
+	return sub
 }
 
-func Publish[T any](b *Bus, event T) {
-	b.write <- PublishedEvent{Event: event}
+func Publish[T any](c *Client, event T) {
+	c.Bus.write <- PublishedEvent{
+		Event: event,
+		From:  c,
+	}
 }
